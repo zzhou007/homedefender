@@ -25,6 +25,9 @@
 
 //other includes
 #include "usart_atmega1284.h"
+#include "5110.h"
+#include "5110.cpp"
+#include "keypad.h"
 
 //----------------------------------------------------------------------------------global variables
 /*
@@ -57,9 +60,34 @@ char recvsig = 0;
 char temperature = 0;
 //turns the alarm on or off
 char alarmpower = 1;
+//which button is currently pressed on the keypad
+char keypad = 0;
 //-----------------------------------------------------------------------------------state machines
+//sends and receives usart
 enum USART_sm1 { sm1_on, sm1_send, sm1_recieve } usartstate;
+//calculates which alarm bit to set and send
 enum ALARM_sm2 { sm2_off, sm2_on } alarmstate;
+//gets and sets golbal keypad key
+enum SETKEYPAD_sm3 { sm3_on } keypadstate;
+	 
+void Keypad_Tick() {
+	//transition
+	switch(keypadstate) {
+		case sm3_on:
+			keypadstate = sm3_on;
+			break;
+		default:
+			break;
+	}
+	//action
+	switch(keypadstate) {
+		case sm3_on:
+			keypad = GetKeypadKey();
+			break;
+		default:
+			break;
+	}
+}
 
 //sends and receives usart
 void USART_Tick() {
@@ -195,10 +223,16 @@ void StartSecPulse2(unsigned portBASE_TYPE Priority) {
 int main(void) {
 	// initialize ports
 	DDRA = 0xFF; PORTA = 0x00;
+	DDRB = 0xFF; PORTB = 0x00;
 	DDRD = 0xF0; PORTD = 0x0F;
 	//inits
 	initUSART(0);
 	initUSART(1);
+	lcd_init(&PORTB, PB0, &PORTB, PB1, &PORTB, PB2, &PORTB, PB3, &PORTB, PB4);
+	while(1) {
+		char a = GetKeypadKey();
+		lcd_chr(a);
+	}
 	//Start Tasks
 	StartSecPulse1(1);
 	StartSecPulse2(1);
