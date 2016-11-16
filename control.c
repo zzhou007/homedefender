@@ -241,11 +241,11 @@ void SM2_INIT() {
 	alarmstate = sm2_off;
 }
 //screen
-void SM4_INIT() {
+void SM3_INIT() {
 	screenstate = sm3_on;
 }
 //print
-void SM3_INIT() {
+void SM4_INIT() {
 	printstate = sm4_on;
 }
 
