@@ -1,4 +1,3 @@
-
 /*	Partner(s) Name & E-mail: Kenneth Chan (kchan049@ucr.edu) and Zihang Zhou(zzhou007@ucr.edu)
  *	Lab Section: 21 
  *	Assignment: Lab #2  Exercise #4 
