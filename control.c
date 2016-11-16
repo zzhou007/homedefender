@@ -62,33 +62,26 @@ char temperature = 0;
 char alarmpower = 1;
 //which button is currently pressed on the keypad
 char keypad = 0;
+//the string to print to the screen
+//screen 6x14 char
+char screen[6][14] = {
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '}
+};
 //-----------------------------------------------------------------------------------state machines
 //sends and receives usart
 enum USART_sm1 { sm1_on, sm1_send, sm1_recieve } usartstate;
 //calculates which alarm bit to set and send
 enum ALARM_sm2 { sm2_off, sm2_on } alarmstate;
-//gets and sets golbal keypad key
-enum SETKEYPAD_sm3 { sm3_on } keypadstate;
-	 
-void Keypad_Tick() {
-	//transition
-	switch(keypadstate) {
-		case sm3_on:
-			keypadstate = sm3_on;
-			break;
-		default:
-			break;
-	}
-	//action
-	switch(keypadstate) {
-		case sm3_on:
-			keypad = GetKeypadKey();
-			break;
-		default:
-			break;
-	}
-}
-
+//prints screen to screen
+enum SCREEN_sm3 { sm3_on } screenstate;
+//changes screen variable
+enum PRINT_sm4 { sm4_on } printstate;
+		 
 //sends and receives usart
 void USART_Tick() {
 	//transition
@@ -190,14 +183,73 @@ void ALARM_Tick() {
 	}
 }
 
+void Screen_Tick() {
+	//transition
+	switch (printstate) {
+		case sm4_on:
+			printstate = sm4_on;
+			break;
+		default:
+			break;
+	}
+	//action
+	//scren 6x14
+	switch (printstate) {
+		char input;
+		case sm4_on:
+			lcd_clear();
+			for (int i = 0; i < 6; i++) {
+				for (int j = 0; j < 14; j++) {
+					lcd_chr(screen[i][j]);
+				}
+			}
+			break;
+		default:
+			break;
+		
+	}
+}
+
+void Print_Tick() {
+	//transition
+	switch (printstate) {
+		case sm4_on:
+			printstate = sm4_on;
+			break;
+		default:
+			break;
+	}
+	//action
+	switch (printstate) {
+		char input;
+		case sm4_on:
+			screen[1][5] = '9';
+			break;
+		default:
+			break;
+			
+	}
+}
+
 //-------------------------------------------------------------------------------state machine inits
+//usart
 void SM1_Init() {
 	usartstate = sm1_on;
 }
+//alarm
 void SM2_INIT() {
 	alarmstate = sm2_off;
 }
+//screen
+void SM4_INIT() {
+	screenstate = sm3_on;
+}
+//print
+void SM3_INIT() {
+	printstate = sm4_on;
+}
 
+//usart
 void SM1Task() {
 	SM1_Init();
 	for(;;) {
@@ -205,11 +257,28 @@ void SM1Task() {
 		vTaskDelay(100);
 	}
 }
+//alarm
 void SM2Task() {
 	SM2_INIT();
 	for(;;) {
 		ALARM_Tick();
 		vTaskDelay(100);
+	}
+}
+//screen
+void SM3Task() {
+	SM3_INIT();
+	for(;;) {
+		Screen_Tick();
+		vTaskDelay(1000);
+	}
+}
+//print
+void SM4Task() {
+	SM4_INIT();
+	for(;;) {
+		Print_Tick();
+		vTaskDelay(500);
 	}
 }
 
@@ -219,23 +288,26 @@ void StartSecPulse1(unsigned portBASE_TYPE Priority) {
 void StartSecPulse2(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM2Task, (signed portCHAR *)"SM2Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
-
+void StartSecPulse3(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM3Task, (signed portCHAR *)"SM3Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+void StartSecPulse4(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM4Task, (signed portCHAR *)"SM4Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
 int main(void) {
 	// initialize ports
 	DDRA = 0xFF; PORTA = 0x00;
 	DDRB = 0xFF; PORTB = 0x00;
-	DDRD = 0xF0; PORTD = 0x0F;
+	DDRC = 0xF0; PORTC = 0x0F;
 	//inits
 	initUSART(0);
 	initUSART(1);
 	lcd_init(&PORTB, PB0, &PORTB, PB1, &PORTB, PB2, &PORTB, PB3, &PORTB, PB4);
-	while(1) {
-		char a = GetKeypadKey();
-		lcd_chr(a);
-	}
 	//Start Tasks
 	StartSecPulse1(1);
 	StartSecPulse2(1);
+	StartSecPulse3(1);
+	StartSecPulse4(1);
 	//RunSchedular
 	vTaskStartScheduler();
 	
