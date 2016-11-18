@@ -57,8 +57,14 @@ char recvsig = 0;
 char temperature = 0;
 //turns the alarm on or off
 char alarmpower = 1;
+//turn everything on or off
+char power = 1;
+//daytime flag 
+char daytime = 0;
 //which button is currently pressed on the keypad
 char keypad = 0;
+//arms disarms catapult
+char cata = 0;
 //the string to print to the screen
 //screen 6x14 char
 char screen[6][14] = {
@@ -91,7 +97,6 @@ char comparescreen() {
 	for (int i = 0; i < 6; i++) {
 		for (int j = 0; j < 14; j++) {
 			if (screen[i][j] != prevscreen[i][j]) {
-				lcd_chr('c');
 				changed = 1;
 			}
 		}
@@ -121,8 +126,17 @@ void Set_A2D_Pin(unsigned char pinNum) {
 	static unsigned char i = 0;
 	for ( i=0; i<100; i++ ) { asm("nop"); }
 }
+//empties screen
+void emptyscreen() {
+	for (int i = 0; i < 6; i++) {
+		for (int j = 0; j < 14; j++) {
+			screen[i][j] = ' ';
+		}
+	}
+}
 //writes an array to the screen
 void screenarray(char* a) {
+	emptyscreen();
 	int i = 0;
 	int j = 0;
 	int pos = 0;
@@ -149,6 +163,8 @@ enum SCREEN_sm3 { sm3_on, sm3_wait } screenstate;
 enum PRINT_sm4 { sm4_on } printstate;
 //Reads analog parts
 enum A2D_sm5 { sm5_on, sm5_temp, sm5_light } a2dstate;		 
+//sets the flags of the main screen
+enum FLAG_sm6 { sm6_on, sm6_pressed } flagstate;
 
 //sends and receives usart
 void USART_Tick() {
@@ -192,10 +208,14 @@ void ALARM_Tick() {
 		case sm2_off:
 			if (alarmpower == 1)
 				alarmstate = sm2_on;
+			else
+				alarmstate = sm2_off;
 			break;
 		case sm2_on:
 			if (alarmpower == 0)
 				alarmstate = sm2_off;
+			else
+				alarmstate = sm2_on;	
 			break;
 		default:
 			break;
@@ -229,18 +249,28 @@ void ALARM_Tick() {
 			sendsig = sendsig & 0x0F;
 			break;
 		case sm2_on:
-			//turn on different alarms depending
-			if (beam) {
-				sendsig = sendsig | 0x80;
+			/*
+			turn on different alarms depending
+			if daytime is on 
+			and
+			light > 57 turn alarm off
+			*/ 
+			if (daytime && light > 57) {
+				sendsig = sendsig & 0x0F;
 			}
-			if (motion) {
-				sendsig = sendsig | 0x40;
-			}
-			if (fast) {
-				sendsig = sendsig | 0x20;
-			}
-			if (slow) {
-				sendsig = sendsig | 0x10;
+			else {
+				if (beam) {
+					sendsig = sendsig | 0x80;
+				}
+				if (motion) {
+					sendsig = sendsig | 0x40;
+				}
+				if (fast) {
+					sendsig = sendsig | 0x20;
+				}
+				if (slow) {
+					sendsig = sendsig | 0x10;
+				}
 			}
 			break;
 		default:
@@ -268,7 +298,6 @@ void Screen_Tick() {
 	//action
 	//screen 6x14
 	switch (screenstate) {
-		char input;
 		case sm3_on:
 			lcd_clear();
 			for (int i = 0; i < 6; i++) {
@@ -299,6 +328,7 @@ void Print_Tick() {
 		char input;
 		case sm4_on:
 			input = GetKeypadKey();
+			//for analog values
 			if (input == 'A') {
 				//text
 				screenarray("Temp :  C\nLight :");
@@ -313,6 +343,28 @@ void Print_Tick() {
 				char lones = light - (ltens * 10);
 				screen[1][7] = ltens + '0';
 				screen[1][8] = lones + '0';
+			} else { //menu
+				screenarray("_ Power (1)\n_ Daytime (2)\n_ Alarm (3)\n_ Catapult (4)\nLock (*)\nUnlock(#)");
+				//main power
+				if (power)
+					screen[0][0] = 'X';
+				else
+					screen[0][0] = '_';
+				//day time option
+				if (daytime)
+					screen[1][0] = 'X';
+				else
+					screen[1][0] = '_';
+				//alarms on or off
+				if (alarmpower)
+					screen[2][0] = 'X';
+				else
+					screen[2][0] = '_';
+				//catapult on or off
+				if (cata) 
+					screen[3][0] = 'X';
+				else
+					screen[3][0] = '_';
 			}
 			break;
 		default:
@@ -383,6 +435,54 @@ void A2D_Tick() {
 	}
 }
 
+void FLAG_Tick() {
+	char key = GetKeypadKey();
+	//action
+	switch (flagstate) {
+		case sm6_on:
+			if (key == '\0') {
+				flagstate = sm6_on;
+			}
+			else {
+				if (key == '1') {
+					power = !power;
+					if (!power) {
+						daytime = 0;
+						alarmpower = 0;
+						cata = 0;
+					}
+				} else if (key == '2') {
+					if (power) {
+						daytime = !daytime;
+					}
+				} else if (key == '3') {
+					if (power) {
+						alarmpower = !alarmpower;
+					}
+				} else if (key == '4') {
+					if (power) {
+						cata = !cata;
+					}
+				}
+				flagstate = sm6_pressed;
+			}
+			break;
+		case sm6_pressed:
+			if (key == '\0')
+				flagstate = sm6_on;
+			else
+				flagstate = sm6_pressed;
+			break;
+		default:
+			break;
+	}
+	//transition
+	switch (flagstate) {
+		default:
+			break;
+	}
+}
+
 //-------------------------------------------------------------------------------state machine inits
 //usart
 void SM1_Init() {
@@ -404,6 +504,11 @@ void SM4_INIT() {
 void SM5_INIT() {
 	a2dstate = sm5_on;
 }
+//flag
+void SM6_INIT() {
+	flagstate = sm6_on;
+}
+
 //usart
 void SM1Task() {
 	SM1_Init();
@@ -444,6 +549,14 @@ void SM5Task() {
 		vTaskDelay(1000);
 	}
 }
+//flag
+void SM6Task() {
+	SM6_INIT();
+	for (;;) {
+		FLAG_Tick();
+		vTaskDelay(25);
+	}
+}
 
 void StartSecPulse1(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM1Task, (signed portCHAR *)"SM1Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
@@ -460,6 +573,10 @@ void StartSecPulse4(unsigned portBASE_TYPE Priority) {
 void StartSecPulse5(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM5Task, (signed portCHAR *)"SM5Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
+void StartSecPulse6(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM6Task, (signed portCHAR *)"SM6Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+
 int main(void) {
 	// initialize ports
 	DDRA = 0x00; PORTA = 0xFF;
@@ -480,6 +597,7 @@ int main(void) {
 	StartSecPulse3(1);
 	StartSecPulse4(1);
 	StartSecPulse5(1);
+	StartSecPulse6(1);
 	//RunSchedular
 	vTaskStartScheduler();
 	
