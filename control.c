@@ -77,6 +77,11 @@ char prevscreen[6][14] = {
 	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
 	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '}
 };
+
+//if light > 57 turn alarm off
+short light = 0;
+//the temperature in C
+short tempC = 0;
 //----------------------------------------------------------------------------------global functions
 /* compares screen with previous output
 1 if different 0 if same
@@ -102,6 +107,37 @@ char comparescreen() {
 		return 0;
 	}
 }
+//analog to digital
+void A2D_init() {
+	ADCSRA |= (1 << ADEN) | (1 << ADSC) | (1 << ADATE);
+	// ADEN: Enables analog-to-digital conversion
+	// ADSC: Starts analog-to-digital conversion
+	// ADATE: Enables auto-triggering, allowing for constant
+	//	    analog to digital conversions.
+}
+void Set_A2D_Pin(unsigned char pinNum) {
+	ADMUX = (pinNum <= 0x07) ? pinNum : ADMUX;
+	// Allow channel to stabilize
+	static unsigned char i = 0;
+	for ( i=0; i<100; i++ ) { asm("nop"); }
+}
+//writes an array to the screen
+void screenarray(char* a) {
+	int i = 0;
+	int j = 0;
+	int pos = 0;
+	while (a[pos] != '\0') {
+		if (a[pos] != '\n') {
+			screen[i][j] = a[pos];
+			j++;
+		}
+		else {
+			j = 0;
+			i++;
+		}
+		pos++;
+	}
+}
 //-----------------------------------------------------------------------------------state machines
 //sends and receives usart
 enum USART_sm1 { sm1_on, sm1_send, sm1_recieve } usartstate;
@@ -111,7 +147,9 @@ enum ALARM_sm2 { sm2_off, sm2_on } alarmstate;
 enum SCREEN_sm3 { sm3_on, sm3_wait } screenstate;
 //changes screen variable
 enum PRINT_sm4 { sm4_on } printstate;
-		 
+//Reads analog parts
+enum A2D_sm5 { sm5_on, sm5_temp, sm5_light } a2dstate;		 
+
 //sends and receives usart
 void USART_Tick() {
 	//transition
@@ -164,7 +202,7 @@ void ALARM_Tick() {
 	}
 	//action
 	/*
-	recieve
+	receive
 	usart 1: 0x1234 5678 recvsig
 
 	usart 1: 1 = beam break, 1 = break, 0 = not break
@@ -228,7 +266,7 @@ void Screen_Tick() {
 			break;
 	}
 	//action
-	//scren 6x14
+	//screen 6x14
 	switch (screenstate) {
 		char input;
 		case sm3_on:
@@ -260,13 +298,88 @@ void Print_Tick() {
 	switch (printstate) {
 		char input;
 		case sm4_on:
-			screen[1][5] = GetKeypadKey();
-			screen[1][6] = GetKeypadKey();
-			screen[2][6] = '3';			
+			input = GetKeypadKey();
+			if (input == 'A') {
+				//text
+				screenarray("Temp :  C\nLight :");
+				//temp
+				short tempout = tempC - 15;
+				char ttens = tempout / 10;
+				char tones = tempout - (ttens * 10);
+				screen[0][6] = ttens + '0';
+				screen[0][7] = tones + '0';
+				//light
+				char ltens = light / 10;
+				char lones = light - (ltens * 10);
+				screen[1][7] = ltens + '0';
+				screen[1][8] = lones + '0';
+			}
 			break;
 		default:
 			break;
 			
+	}
+}
+//reads analog parts
+void A2D_Tick() {
+	//transition
+	switch (a2dstate) {
+		case sm5_on:
+			a2dstate = sm5_temp;
+			break;
+		case sm5_temp:
+			a2dstate = sm5_light;
+			break;
+		case sm5_light:
+			a2dstate = sm5_temp;
+			break;
+		default:
+			break;
+	}
+	//action
+	switch (a2dstate) {
+		case sm5_on:
+			break;
+		case sm5_temp:
+			Set_A2D_Pin(0x00);
+			float voltage = ADC * 5.0;
+			voltage /= 1024.0;
+			float tempc = (voltage - 0.5) * 100;
+			//truncates the dec
+			tempC = (short)round(tempc);
+			/* testing
+			int tempi = (int)tempc;
+			int tens = tempi / 10;
+			int ones = tempi - (tens * 10);
+			if (tens >= 2)
+				tens = tens - 2;
+			else
+				tens = 0;
+			lcd_chr(tens + '0');
+			lcd_chr(ones + '0');
+			*/
+			break;
+		case sm5_light:
+			Set_A2D_Pin(0x02);
+			
+			/* testing
+			lcd_goto_xy(0,0);
+			lcd_chr('0' + ((ADC>>9)&0x001));
+			lcd_chr('0' + ((ADC>>8)&0x001));
+			lcd_chr('0' + ((ADC>>7)&0x001));
+			lcd_chr('0' + ((ADC>>6)&0x001));
+			lcd_chr('0' + ((ADC>>5)&0x001));
+			lcd_chr('0' + ((ADC>>4)&0x001));
+			lcd_chr('0' + ((ADC>>3)&0x001));
+			lcd_chr('0' + ((ADC>>2)&0x001));
+			lcd_chr('0' + ((ADC>>1)&0x001));
+			lcd_chr('0' + ((ADC>>0)&0x001));
+			*/
+			//turn alarm off if lights > 57
+			light = ADC;
+			break;
+		default:
+			break;	
 	}
 }
 
@@ -287,7 +400,10 @@ void SM3_INIT() {
 void SM4_INIT() {
 	printstate = sm4_on;
 }
-
+//a2d
+void SM5_INIT() {
+	a2dstate = sm5_on;
+}
 //usart
 void SM1Task() {
 	SM1_Init();
@@ -309,7 +425,7 @@ void SM3Task() {
 	SM3_INIT();
 	for(;;) {
 		Screen_Tick();
-		vTaskDelay(1000);
+		vTaskDelay(50);
 	}
 }
 //print
@@ -317,7 +433,15 @@ void SM4Task() {
 	SM4_INIT();
 	for(;;) {
 		Print_Tick();
-		vTaskDelay(500);
+		vTaskDelay(25);
+	}
+}
+//a2d
+void SM5Task() {
+	SM5_INIT();
+	for (;;) {
+		A2D_Tick();
+		vTaskDelay(1000);
 	}
 }
 
@@ -333,20 +457,29 @@ void StartSecPulse3(unsigned portBASE_TYPE Priority) {
 void StartSecPulse4(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM4Task, (signed portCHAR *)"SM4Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
+void StartSecPulse5(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM5Task, (signed portCHAR *)"SM5Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
 int main(void) {
 	// initialize ports
-	DDRA = 0xFF; PORTA = 0x00;
+	DDRA = 0x00; PORTA = 0xFF;
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xF0; PORTC = 0x0F;
 	//inits
+	//actuator
 	initUSART(0);
+	//sensors
 	initUSART(1);
+	//lcd
 	lcd_init(&PORTB, PB0, &PORTB, PB1, &PORTB, PB2, &PORTB, PB3, &PORTB, PB4);
+	//adc
+	A2D_init();
 	//Start Tasks
 	StartSecPulse1(1);
 	StartSecPulse2(1);
 	StartSecPulse3(1);
 	StartSecPulse4(1);
+	StartSecPulse5(1);
 	//RunSchedular
 	vTaskStartScheduler();
 	
