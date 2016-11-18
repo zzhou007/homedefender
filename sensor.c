@@ -66,7 +66,7 @@ void Set_A2D_Pin(unsigned char pinNum) {
 	ADMUX = (pinNum <= 0x07) ? pinNum : ADMUX;
 	// Allow channel to stabilize
 	static unsigned char i = 0;
-	for ( i=0; i<15; i++ ) { asm("nop"); }
+	for ( i=0; i<100; i++ ) { asm("nop"); }
 }
 
 //----------------------------------------------------------------------------------global functions
@@ -101,7 +101,8 @@ void Sensor_Tick() {
 				output = output | 0x02;
 			else
 				output = output & 0xFD;
-			PORTC = output;
+			Set_A2D_Pin(0x02);
+			PORTC = output | (ADC >> 2);
 			break; 
 		default:
 			break;
@@ -132,6 +133,8 @@ int main(void) {
 	DDRB = 0x00; PORTB = 0xFF;
 	DDRC = 0xFF; PORTC = 0x00;
 	//inits
+	//adc
+	A2D_init();
 	//usart
 	initUSART(0);
 	initUSART(1);
