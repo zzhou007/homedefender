@@ -26,21 +26,6 @@
 //other includes
 #include "usart_atmega1284.h"
 
-//----------------------------------------------------------------------------------global functions
-//analog to digital
-void A2D_init() {
-	ADCSRA |= (1 << ADEN) | (1 << ADSC) | (1 << ADATE);
-	// ADEN: Enables analog-to-digital conversion
-	// ADSC: Starts analog-to-digital conversion
-	// ADATE: Enables auto-triggering, allowing for constant
-	//	    analog to digital conversions.
-}
-void Set_A2D_Pin(unsigned char pinNum) {
-	ADMUX = (pinNum <= 0x07) ? pinNum : ADMUX;
-	// Allow channel to stabilize
-	static unsigned char i = 0;
-	for ( i=0; i<15; i++ ) { asm("nop"); }
-}
 //----------------------------------------------------------------------------------global variables
 /*
 usart 0: 0x1234 5678 sendsig
@@ -57,10 +42,7 @@ usart 0: 8 = motor2, 1 = spin right, 0 = spin left
 */
 char sendsig = 0;
 /*
-usart 0: 0x1234 5678 temperature
 usart 1: 0x1234 5678 recvsig
-
-usart 0: 1-8 = temp analog
 
 usart 1: 1 = beam break, 1 = break, 0 = not break
 usart 1: 2 = pid motion, 1 = motion, 0 = no motion
@@ -70,6 +52,27 @@ usart 1: 5-8 = photo resistor
 */
 char recvsig = 0;
 char temperature = 0;
+
+//----------------------------------------------------------------------------------global functions
+//analog to digital
+void A2D_init() {
+	ADCSRA |= (1 << ADEN) | (1 << ADSC) | (1 << ADATE);
+	// ADEN: Enables analog-to-digital conversion
+	// ADSC: Starts analog-to-digital conversion
+	// ADATE: Enables auto-triggering, allowing for constant
+	//	    analog to digital conversions.
+}
+void Set_A2D_Pin(unsigned char pinNum) {
+	ADMUX = (pinNum <= 0x07) ? pinNum : ADMUX;
+	// Allow channel to stabilize
+	static unsigned char i = 0;
+	for ( i=0; i<15; i++ ) { asm("nop"); }
+}
+
+//----------------------------------------------------------------------------------global functions
+
+
+//----------------------------------------------------------------------------------------state machines
 enum Sensor_sm1 { sm1_on } sensorstate;
 		 
 void Sensor_Tick() {
@@ -88,7 +91,7 @@ void Sensor_Tick() {
 		case sm1_on:
 			//ir beam
 			A0 = PINA & 0x01;
-			if (A0)
+			if (!A0)
 				output = output | 0x01;
 			else
 				output = output & 0xFE;
@@ -98,7 +101,7 @@ void Sensor_Tick() {
 				output = output | 0x02;
 			else
 				output = output & 0xFD;
-			PORTC = output | (ADC << 2);
+			PORTC = output;
 			break; 
 		default:
 			break;
@@ -107,12 +110,10 @@ void Sensor_Tick() {
 }
 
 //-------------------------------------------------------------------------------state machine inits
-//print
 void SM1_INIT() {
 	sensorstate = sm1_on;
 }
 
-//print
 void SM1Task() {
 	SM1_INIT();
 	for(;;) {
@@ -134,9 +135,6 @@ int main(void) {
 	//usart
 	initUSART(0);
 	initUSART(1);
-	//adc
-	A2D_init();
-	Set_A2D_Pin(0x02);
 	//Start Tasks
 	StartSecPulse1(1);
 	//RunSchedular
