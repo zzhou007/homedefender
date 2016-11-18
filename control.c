@@ -45,10 +45,7 @@ usart 0: 8 = motor2, 1 = spin right, 0 = spin left
 */
 char sendsig = 0;
 /*
-usart 0: 0x1234 5678 temperature
 usart 1: 0x1234 5678 recvsig
-
-usart 0: 1-8 = temp analog
 
 usart 1: 1 = beam break, 1 = break, 0 = not break
 usart 1: 2 = pid motion, 1 = motion, 0 = no motion
@@ -72,13 +69,46 @@ char screen[6][14] = {
 	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
 	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '}
 };
+char prevscreen[6][14] = {
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '},
+	{' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '}
+};
+//----------------------------------------------------------------------------------global functions
+/* compares screen with previous output
+1 if different 0 if same
+sets prevscreen to new screen if different*/
+char comparescreen() {
+	char changed = 0;
+	for (int i = 0; i < 6; i++) {
+		for (int j = 0; j < 14; j++) {
+			if (screen[i][j] != prevscreen[i][j]) {
+				lcd_chr('c');
+				changed = 1;
+			}
+		}
+	}
+	if (changed) {
+		for (int i = 0; i < 6; i++) {
+			for (int j = 0; j < 14; j++) {
+				prevscreen[i][j] = screen[i][j];
+			}
+		}
+		return 1;
+	} else {
+		return 0;
+	}
+}
 //-----------------------------------------------------------------------------------state machines
 //sends and receives usart
 enum USART_sm1 { sm1_on, sm1_send, sm1_recieve } usartstate;
 //calculates which alarm bit to set and send
 enum ALARM_sm2 { sm2_off, sm2_on } alarmstate;
 //prints screen to screen
-enum SCREEN_sm3 { sm3_on } screenstate;
+enum SCREEN_sm3 { sm3_on, sm3_wait } screenstate;
 //changes screen variable
 enum PRINT_sm4 { sm4_on } printstate;
 		 
@@ -110,9 +140,6 @@ void USART_Tick() {
 		case sm1_recieve:
 			if (USART_HasReceived(1)) {
 				recvsig = USART_Receive(1);
-			}
-			if (USART_HasReceived(0)) {
-				temperature = USART_Receive(0);
 			}
 			break;
 		default:
@@ -185,24 +212,34 @@ void ALARM_Tick() {
 
 void Screen_Tick() {
 	//transition
-	switch (printstate) {
-		case sm4_on:
-			printstate = sm4_on;
+	switch (screenstate) {
+		case sm3_on:
+			screenstate = sm3_wait;
+			break;
+		case sm3_wait:
+			if (comparescreen()) {
+				screenstate = sm3_on;
+			}
+			else {
+				screenstate = sm3_wait;
+			}
 			break;
 		default:
 			break;
 	}
 	//action
 	//scren 6x14
-	switch (printstate) {
+	switch (screenstate) {
 		char input;
-		case sm4_on:
+		case sm3_on:
 			lcd_clear();
 			for (int i = 0; i < 6; i++) {
 				for (int j = 0; j < 14; j++) {
 					lcd_chr(screen[i][j]);
 				}
 			}
+			break;
+		case sm3_wait:
 			break;
 		default:
 			break;
@@ -223,7 +260,9 @@ void Print_Tick() {
 	switch (printstate) {
 		char input;
 		case sm4_on:
-			screen[1][5] = '9';
+			screen[1][5] = GetKeypadKey();
+			screen[1][6] = GetKeypadKey();
+			screen[2][6] = '3';			
 			break;
 		default:
 			break;
