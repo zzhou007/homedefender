@@ -88,7 +88,7 @@ void Sensor_Tick() {
 		case sm1_on:
 			//ir beam
 			A0 = PINA & 0x01;
-			if (!A0)
+			if (A0)
 				output = output | 0x01;
 			else
 				output = output & 0xFE;
