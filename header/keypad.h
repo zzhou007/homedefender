@@ -19,11 +19,11 @@
 #ifndef KEYPAD_H
 #define KEYPAD_H
 
-#include <bit.h>
+#include "bit.h"
 
 // Keypad Setup Values
-#define KEYPADPORT PORTD
-#define KEYPADPIN  PIND
+#define KEYPADPORT PORTC
+#define KEYPADPIN  PINC
 #define ROW1 0
 #define ROW2 1
 #define ROW3 2
