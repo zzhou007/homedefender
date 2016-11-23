@@ -28,53 +28,37 @@
 
 //----------------------------------------------------------------------------------global variables
 /*
-usart 0: 0x1234 5678 sendsig
+0x1234 5678
+//send
+usart 0: 1 = beam break, 1 = break, 0 = not break
+usart 0: 2 = pid motion, 1 = motion, 0 = no motion
 
-usart 0: 1 = window alarm, 1 = on, 0 = off
-usart 0: 2 = room alarm, 1 = on, 0 = off
-usart 0: 3 = motion alarm fast, 1 = on, 0 = off
-usart 0: 4 = motion alarm slow, 1 = on, 0 = off
+//receive
+//alarm
+1
+2
+3
+4
 
 usart 0: 5 = motor1, 1 = on, 0 = off
 usart 0: 6 = motor1, 1 = spin right, 0 = spin left
 usart 0: 7 = motor2, 1 = on, 0 = off
 usart 0: 8 = motor2, 1 = spin right, 0 = spin left
 */
-char sendsig = 0;
-/*
-usart 1: 0x1234 5678 recvsig
-
-usart 1: 1 = beam break, 1 = break, 0 = not break
-usart 1: 2 = pid motion, 1 = motion, 0 = no motion
-usart 1: 3 = accelerometer, 1 = fast motion, 0 = no motion 
-usart 1: 4 = accelerometer, 1 = slow motion, 0 = no motion
-usart 1: 5-8 = photo resistor
-*/
 char recvsig = 0;
+char sendsig = 0;
+
 char temperature = 0;
-
+char speaker = 0;
+char tone = 0;
 //----------------------------------------------------------------------------------global functions
-//analog to digital
-void A2D_init() {
-	ADCSRA |= (1 << ADEN) | (1 << ADSC) | (1 << ADATE);
-	// ADEN: Enables analog-to-digital conversion
-	// ADSC: Starts analog-to-digital conversion
-	// ADATE: Enables auto-triggering, allowing for constant
-	//	    analog to digital conversions.
-}
-void Set_A2D_Pin(unsigned char pinNum) {
-	ADMUX = (pinNum <= 0x07) ? pinNum : ADMUX;
-	// Allow channel to stabilize
-	static unsigned char i = 0;
-	for ( i=0; i<100; i++ ) { asm("nop"); }
-}
-
-//----------------------------------------------------------------------------------global functions
-
-
 //----------------------------------------------------------------------------------------state machines
 enum Sensor_sm1 { sm1_on } sensorstate;
-		 
+enum Usart_sm2 { sm2_on, sm2_send, sm2_recieve } usartstate;
+enum Speaker_sm3 { sm3_on, sm3_off } speakerstate;
+enum SpeakerC_sm4 { sm4_on } speakercstate;	
+enum Moters_sm5 { sm5_on } motorstate;
+
 void Sensor_Tick() {
 	//transition
 	switch (sensorstate) {
@@ -91,18 +75,53 @@ void Sensor_Tick() {
 		case sm1_on:
 			//ir beam
 			A0 = PINA & 0x01;
-			if (!A0)
+			//output set bit to 1 if beam broken 0 if not
+			//sendsig set 0x1234 5678
+			//set 1 to 1 if beam broken 0 if not
+			if (!A0) {
 				output = output | 0x01;
-			else
+				sendsig = sendsig | 0x80;
+			} else {
 				output = output & 0xFE;
+				sendsig = sendsig & 0x7F;
+			}
+			
 			//motion
+			//output set bit to 1 if  motion detected 0 if not
+			//sendsig set 0x1234 5678
+			//set 2 to 1 if motion 0 if not
 			A1 = (PINA & 0x02) >> 1;
-			if (A1)
+			if (A1) {
 				output = output | 0x02;
-			else
+				sendsig = sendsig | 0x40;
+			} else {
 				output = output & 0xFD;
-			Set_A2D_Pin(0x02);
-			PORTC = output | (ADC >> 2);
+				sendsig = sendsig & 0xBF;
+			}
+			
+			//fast slow and fire for leds
+			char fast = (recvsig >> 5) & 0x01;
+			char slow = (recvsig >> 4) & 0x01;
+			char fire = (recvsig >> 3) & 0x01;
+			//fast door
+			if (fast) {
+				output = output | 0x04;
+			} else {
+				output = output & 0xFB;
+			}
+			//slow door
+			if (slow) {
+				output = output | 0x08;
+			} else {
+				output = output & 0xF7;
+			}
+			//fire 
+			if (fire) {
+				output = output | 0x10;
+			} else {
+				output = output & 0xEF;
+			}
+			PORTC = output;
 			break; 
 		default:
 			break;
@@ -110,10 +129,193 @@ void Sensor_Tick() {
 	}
 }
 
+//sends and receives usart
+void USART_Tick() {
+	//transition
+	switch(usartstate) {
+		case sm2_on:
+			usartstate = sm2_send;
+			break;
+		case sm2_send:
+			usartstate = sm2_recieve;
+			break;
+		case sm2_recieve:
+			usartstate = sm2_send;
+			break;
+		default:
+			break;
+	}
+	//action
+	switch(usartstate) {
+		case sm2_on:
+			break;
+		case sm2_send:
+			if (USART_IsSendReady(0)) {
+				USART_Send(sendsig,0);
+			}
+			break;
+		case sm2_recieve:
+			if (USART_HasReceived(0)) {
+				recvsig = USART_Receive(0);
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+void Speaker_Tick() {
+	//transition
+	static unsigned short timer = 0;
+	switch(speakerstate) {
+		case sm3_on:
+			speakerstate = sm3_off;
+			break;
+		case sm3_off:
+			if (speaker) {
+				timer++;
+				if (tone == 1) {
+					timer = 0;
+					speakerstate = sm3_on;
+				} else if (tone == 2) {
+					if (timer > 1) {
+						timer = 0;
+						speakerstate = sm3_on;
+					}
+				} else if (tone == 3) {
+					if (timer > 2) {
+						timer = 0;
+						speakerstate = sm3_on;
+					}
+				} else if (tone == 4) {
+					if (timer > 4) {
+						timer = 0;
+						speakerstate = sm3_on;
+					}
+				} else if (tone == 5) {
+					if (timer > 8) {
+						timer = 0;
+						speakerstate = sm3_on;
+					}
+				}
+			} else {
+				speakerstate = sm3_off;
+			}
+			break;
+		default:
+			break;
+	}
+	switch(speakerstate) {
+		case sm3_on:
+			PORTB = 0xFF;
+			break;
+		case sm3_off:
+			PORTB = 0x00;
+			break;
+		default:
+			break;
+	}
+}
+
+void SpeakerC_Tick() {
+	char window = (recvsig >> 7) & 0x01;
+	char room = (recvsig >> 6) & 0x01;
+	char fast = (recvsig >> 5) & 0x01;
+	char slow = (recvsig >> 4) & 0x01;
+	char fire = (recvsig >> 3) & 0x01;
+	switch(speakercstate) {
+		case sm4_on:
+			speakercstate = sm4_on;
+			break;
+		default:
+			break;
+	}
+	switch (speakercstate) {
+		case sm4_on:
+			if (window) {
+				if (room || fast || slow || fire) {
+					tone++;
+					if (tone > 5) {
+						tone = 0;
+					}
+				} else {
+					speaker = 1;
+					tone = 1;
+				}
+			}
+			if (room) {
+				if (window || fast || slow || fire) {
+					tone++;
+					if (tone > 5) {
+						tone = 0;
+					}
+				} else {
+					speaker = 1;
+					tone = 2;
+				}
+			}
+			if (fast) {
+				if (window || room || slow || fire) {
+					tone++;
+					if (tone > 5) {
+						tone = 0;
+					}
+				} else {
+					speaker = 1;
+					tone = 3;
+				}
+			}
+			if (slow) {
+				if (window || room || fast || fire) {
+					tone++;
+					if (tone > 5) {
+						tone = 0;
+					}
+				} else {
+					speaker = 1;
+					tone = 4;
+				}
+			}
+			if (fire) {
+				if (window || room || fast || slow) {
+					tone++;
+					if (tone > 5) {
+						tone = 0;
+					}
+				} else {
+					speaker = 1;
+					tone = 5;
+				}
+			}
+			if (!window && !room && !fast && !slow && !fire) {
+				speaker = 0;
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+void Motor_Tick() {
+	
+}
 //-------------------------------------------------------------------------------state machine inits
 void SM1_INIT() {
 	sensorstate = sm1_on;
 }
+void SM2_INIT() {
+	usartstate = sm2_on;
+}
+void SM3_INIT() {
+	speakerstate = sm3_on;
+}
+void SM4_INIT() {
+	speakercstate = sm4_on;
+}
+void SM5_INIT() {
+	motorstate = sm5_on;
+}
+
 
 void SM1Task() {
 	SM1_INIT();
@@ -122,24 +324,70 @@ void SM1Task() {
 		vTaskDelay(50);
 	}
 }
+void SM2Task() {
+	SM2_INIT();
+	for(;;) {
+		USART_Tick();
+		vTaskDelay(100);
+	}
+}
+void SM3Task() {
+	SM3_INIT();
+	for(;;) {
+		Speaker_Tick();
+		vTaskDelay(1);
+	}
+}
+void SM4Task() {
+	SM4_INIT();
+	for(;;) {
+		SpeakerC_Tick();
+		vTaskDelay(100);
+	}
+}
+void SM5Task() {
+	SM5_INIT();
+	for(;;) {
+		Motor_Tick();
+		vTaskDelay(500);
+	}
+}
 
 void StartSecPulse1(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM1Task, (signed portCHAR *)"SM1Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+void StartSecPulse2(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM2Task, (signed portCHAR *)"SM2Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+void StartSecPulse3(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM3Task, (signed portCHAR *)"SM3Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+void StartSecPulse4(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM4Task, (signed portCHAR *)"SM4Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
+void StartSecPulse5(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM5Task, (signed portCHAR *)"SM5Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
 int main(void) {
 	// initialize ports
 	//everything input
 	DDRA = 0x00; PORTA = 0xFF;
-	DDRB = 0x00; PORTB = 0xFF;
+	//output
+	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xFF; PORTC = 0x00;
+	//motor
+	DDRD = 0x0F; PORTD = 0xF0;
+	
 	//inits
-	//adc
-	A2D_init();
 	//usart
 	initUSART(0);
-	initUSART(1);
 	//Start Tasks
 	StartSecPulse1(1);
+	StartSecPulse2(1);
+	StartSecPulse3(1);
+	StartSecPulse4(1);
+	StartSecPulse5(1);
+	
 	//RunSchedular
 	vTaskStartScheduler();
 	
