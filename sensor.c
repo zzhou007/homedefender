@@ -53,12 +53,18 @@ char speaker = 0;
 char tone = 0;
 //----------------------------------------------------------------------------------global functions
 //----------------------------------------------------------------------------------------state machines
+//sets sensor and sets leds
 enum Sensor_sm1 { sm1_on } sensorstate;
+//sends and recieves usart
 enum Usart_sm2 { sm2_on, sm2_send, sm2_recieve } usartstate;
+//speaker code turns on speaker and given tone
 enum Speaker_sm3 { sm3_on, sm3_off } speakerstate;
+//manages the speaker sets tone and speaker
 enum SpeakerC_sm4 { sm4_on } speakercstate;	
+//manages the motors 
 enum Moters_sm5 { sm5_on } motorstate;
 
+//sends sensors ir and motion and sets led 
 void Sensor_Tick() {
 	//transition
 	switch (sensorstate) {
@@ -164,6 +170,7 @@ void USART_Tick() {
 	}
 }
 
+//turns the speaker on and off and plays a tone depending on tone variable
 void Speaker_Tick() {
 	//transition
 	static unsigned short timer = 0;
@@ -217,6 +224,7 @@ void Speaker_Tick() {
 	}
 }
 
+//controls the speaker
 void SpeakerC_Tick() {
 	char window = (recvsig >> 7) & 0x01;
 	char room = (recvsig >> 6) & 0x01;
@@ -296,27 +304,33 @@ void SpeakerC_Tick() {
 	}
 }
 
+//controls the motor
 void Motor_Tick() {
 	
 }
 //-------------------------------------------------------------------------------state machine inits
+//sensors and led
 void SM1_INIT() {
 	sensorstate = sm1_on;
 }
+//usart
 void SM2_INIT() {
 	usartstate = sm2_on;
 }
+//speaker
 void SM3_INIT() {
 	speakerstate = sm3_on;
 }
+//speaker control
 void SM4_INIT() {
 	speakercstate = sm4_on;
 }
+//motors
 void SM5_INIT() {
 	motorstate = sm5_on;
 }
 
-
+//sensor and leds
 void SM1Task() {
 	SM1_INIT();
 	for(;;) {
@@ -324,6 +338,7 @@ void SM1Task() {
 		vTaskDelay(50);
 	}
 }
+//usart
 void SM2Task() {
 	SM2_INIT();
 	for(;;) {
@@ -331,6 +346,7 @@ void SM2Task() {
 		vTaskDelay(100);
 	}
 }
+//speaker
 void SM3Task() {
 	SM3_INIT();
 	for(;;) {
@@ -338,6 +354,7 @@ void SM3Task() {
 		vTaskDelay(1);
 	}
 }
+//speaker control
 void SM4Task() {
 	SM4_INIT();
 	for(;;) {
@@ -345,6 +362,7 @@ void SM4Task() {
 		vTaskDelay(100);
 	}
 }
+//motor
 void SM5Task() {
 	SM5_INIT();
 	for(;;) {
