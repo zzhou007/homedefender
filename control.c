@@ -28,32 +28,37 @@
 #include "5110.h"
 #include "5110.cpp"
 #include "keypad.h"
-
+//-----------------------------------------------------------------------------------macro 
+#define TEMPOUT(x)		((x) - 25)
+#define FIRE(x)			(TEMPOUT(x) > 19 ? 1 : 0)
+#define LIGHT(x)		((x) > 57 ? 1 : 0)
 //----------------------------------------------------------------------------------global variables
 /*
-usart 0: 0x1234 5678 sendsig
+0x1234 5678
+//receive
+usart 0: 1 = beam break, 1 = break, 0 = not break
+usart 0: 2 = pid motion, 1 = motion, 0 = no motion
 
-usart 0: 1 = window alarm, 1 = on, 0 = off
-usart 0: 2 = room alarm, 1 = on, 0 = off
-usart 0: 3 = motion alarm fast, 1 = on, 0 = off
-usart 0: 4 = motion alarm slow, 1 = on, 0 = off
+//send
+//alarm
+1
+2
+3
+4
 
 usart 0: 5 = motor1, 1 = on, 0 = off
 usart 0: 6 = motor1, 1 = spin right, 0 = spin left
 usart 0: 7 = motor2, 1 = on, 0 = off
 usart 0: 8 = motor2, 1 = spin right, 0 = spin left
 */
-char sendsig = 0;
-/*
-usart 1: 0x1234 5678 recvsig
-
-usart 1: 1 = beam break, 1 = break, 0 = not break
-usart 1: 2 = pid motion, 1 = motion, 0 = no motion
-usart 1: 3 = accelerometer, 1 = fast motion, 0 = no motion 
-usart 1: 4 = accelerometer, 1 = slow motion, 0 = no motion
-usart 1: 5-8 = photo resistor
-*/
 char recvsig = 0;
+char sendsig = 0;
+
+//door opens fast
+char fast = 0;
+//door opens slow
+char slow = 0;
+
 char temperature = 0;
 //turns the alarm on or off
 char alarmpower = 1;
@@ -88,6 +93,14 @@ char prevscreen[6][14] = {
 short light = 0;
 //the temperature in C
 short tempC = 0;
+//the accelerometer on all axis 
+short accelX = 0;
+short accelY = 0;
+short accelZ = 0;
+//the previous 
+short accelXp = 0;
+short accelYp = 0;
+short accelZp = 0;
 //----------------------------------------------------------------------------------global functions
 /* compares screen with previous output
 1 if different 0 if same
@@ -162,9 +175,11 @@ enum SCREEN_sm3 { sm3_on, sm3_wait } screenstate;
 //changes screen variable
 enum PRINT_sm4 { sm4_on } printstate;
 //Reads analog parts
-enum A2D_sm5 { sm5_on, sm5_temp, sm5_light } a2dstate;		 
+enum A2D_sm5 { sm5_on, sm5_temp, sm5_light, sm5_accel } a2dstate;		 
 //sets the flags of the main screen
 enum FLAG_sm6 { sm6_on, sm6_pressed } flagstate;
+//door checks fast and slow sets variable
+enum Door_sm7 { sm7_on } doorstate;
 
 //sends and receives usart
 void USART_Tick() {
@@ -192,8 +207,8 @@ void USART_Tick() {
 			}
 			break;
 		case sm1_recieve:
-			if (USART_HasReceived(1)) {
-				recvsig = USART_Receive(1);
+			if (USART_HasReceived(0)) {
+				recvsig = USART_Receive(0);
 			}
 			break;
 		default:
@@ -225,10 +240,10 @@ void ALARM_Tick() {
 	receive
 	usart 1: 0x1234 5678 recvsig
 
-	usart 1: 1 = beam break, 1 = break, 0 = not break
-	usart 1: 2 = pid motion, 1 = motion, 0 = no motion
-	usart 1: 3 = accelerometer, 1 = fast motion, 0 = no motion
-	usart 1: 4 = accelerometer, 1 = slow motion, 0 = no motion
+	usart 0: 1 = beam break, 1 = break, 0 = not break
+	usart 0: 2 = pid motion, 1 = motion, 0 = no motion
+	usart 0: 3 = accelerometer, 1 = fast motion, 0 = no motion
+	usart 0: 4 = accelerometer, 1 = slow motion, 0 = no motion
 	
 	send
 	usart 0: 0x1234 5678 sendsig
@@ -237,11 +252,10 @@ void ALARM_Tick() {
 	usart 0: 2 = room alarm, 1 = on, 0 = off
 	usart 0: 3 = motion alarm fast, 1 = on, 0 = off
 	usart 0: 4 = motion alarm slow, 1 = on, 0 = off
+	usart 0: 5 = fire 1 = yes, 0 = on
 	*/
 	char beam = (recvsig >> 7) & 0x01;
 	char motion = (recvsig >> 6) & 0x01;
-	char fast = (recvsig >> 5) & 0x01;
-	char slow = (recvsig >> 4) & 0x01;
 	
 	switch(alarmstate) {
 		case sm2_off:
@@ -255,22 +269,35 @@ void ALARM_Tick() {
 			and
 			light > 57 turn alarm off
 			*/ 
-			if (daytime && light > 57) {
+			if (daytime && LIGHT(light)) {
 				sendsig = sendsig & 0x0F;
 			}
 			else {
 				if (beam) {
 					sendsig = sendsig | 0x80;
+				} else {
+					sendsig = sendsig & 0x7F;
 				}
 				if (motion) {
 					sendsig = sendsig | 0x40;
+				} else {
+					sendsig = sendsig & 0xBF;
 				}
 				if (fast) {
 					sendsig = sendsig | 0x20;
+				} else {
+					sendsig = sendsig & 0xDF;
 				}
 				if (slow) {
 					sendsig = sendsig | 0x10;
+				} else {
+					sendsig = sendsig & 0xEF;
 				}
+			}
+			if (FIRE(tempC) ) {
+				sendsig = sendsig | 0x08;
+			} else {
+				sendsig = sendsig & 0xF7;
 			}
 			break;
 		default:
@@ -278,6 +305,7 @@ void ALARM_Tick() {
 	}
 }
 
+//actually prints stuff to screen
 void Screen_Tick() {
 	//transition
 	switch (screenstate) {
@@ -314,6 +342,7 @@ void Screen_Tick() {
 	}
 }
 
+//sets what to print
 void Print_Tick() {
 	//transition
 	switch (printstate) {
@@ -328,21 +357,127 @@ void Print_Tick() {
 		char input;
 		case sm4_on:
 			input = GetKeypadKey();
-			//for analog values
 			if (input == 'A') {
+				//text
+				screenarray("Daytime\nAlarms off :\n\nFire :\n");
+				//check 
+				if (daytime && (LIGHT(light))) {
+					screen[1][12] = 'Y';
+				}
+				else {
+					screen[1][12] = 'N';
+				}
+				//(tempC - 25) >= 30 
+				if (FIRE(tempC)) {
+					screen[3][6] = 'Y';
+				}
+				else {
+					screen[3][6] = 'N';
+				}
+			} else if (input == 'B') {
+				//text
+				screenarray("Window :\nRoom :\nDoor Slow :\nDoor Fast :");
+				//check
+				//window
+				if ((recvsig >> 7) & 0x01) {
+					screen[0][8] = 'Y';
+				} else {
+					screen[0][8] = 'N';
+				}
+				
+				//room
+				if ((recvsig >> 6) & 0x01) {
+					screen[1][6] = 'Y';
+				} else {
+					screen[1][6] = 'N';
+				}
+				
+				//slow
+				if (slow) {
+					screen[2][11] = 'Y';
+				} else {
+					screen[2][11] = 'N';
+				}
+				
+				//fast
+				if (fast) {
+					screen[3][11] = 'Y';
+				} else {
+					screen[3][11] = 'N';
+				}
+				
+			} else if (input == 'C') {
 				//text
 				screenarray("Temp :  C\nLight :");
 				//temp
-				short tempout = tempC - 15;
+				short tempout = TEMPOUT(tempC);
 				char ttens = tempout / 10;
 				char tones = tempout - (ttens * 10);
-				screen[0][6] = ttens + '0';
-				screen[0][7] = tones + '0';
+				if (ttens >= 10 || tones >= 10) {
+					screen[0][6] = 'O';
+					screen[0][7] = 'V';
+					screen[0][8] = 'E';
+					screen[0][9] = 'R';
+						
+				} else {
+					screen[0][6] = ttens + '0';
+					screen[0][7] = tones + '0';
+				}
 				//light
 				char ltens = light / 10;
 				char lones = light - (ltens * 10);
-				screen[1][7] = ltens + '0';
-				screen[1][8] = lones + '0';
+				if (ltens >= 10) {
+					screen[1][7] = 'O';
+					screen[1][8] = 'V';
+					screen[1][9] = 'E';
+					screen[1][10] = 'R';
+				} else {
+					screen[1][7] = ltens + '0';
+					screen[1][8] = lones + '0';
+				}
+			} else if (input == 'D') {
+				char xbuff[5];
+				char ybuff[5];
+				char zbuff[5];
+				
+				char xpbuff[5];
+				char ypbuff[5];
+				char zpbuff[5];
+				
+				screenarray("MotionX :\nMotionY :\nMotionZ :\nMotionXp :\nMotionYp :\nMotionZp :");
+				
+				itoa(accelX, xbuff, 10);
+				itoa(accelY, ybuff, 10);
+				itoa(accelZ, zbuff, 10);
+				
+				itoa(accelXp, xpbuff, 10);
+				itoa(accelYp, ypbuff, 10);
+				itoa(accelZp, zpbuff, 10);
+				
+				screen[0][9] = xbuff[0];
+				screen[0][10] = xbuff[1];
+				screen[0][11] = xbuff[2];
+				
+				screen[1][9] = ybuff[0];
+				screen[1][10] = ybuff[1];
+				screen[1][11] = ybuff[2];
+				
+				screen[2][9] = zbuff[0];
+				screen[2][10] = zbuff[1];
+				screen[2][11] = zbuff[2];
+
+				screen[3][10] = xpbuff[0];
+				screen[3][11] = xpbuff[1];
+				screen[3][12] = xpbuff[2];
+								
+				screen[4][10] = ypbuff[0];
+				screen[4][11] = ypbuff[1];
+				screen[4][12] = ypbuff[2];
+								
+				screen[5][10] = zpbuff[0];
+				screen[5][11] = zpbuff[1];
+				screen[5][12] = zpbuff[2];
+				
 			} else { //menu
 				screenarray("_ Power (1)\n_ Daytime (2)\n_ Alarm (3)\n_ Catapult (4)\nLock (*)\nUnlock(#)");
 				//main power
@@ -383,6 +518,9 @@ void A2D_Tick() {
 			a2dstate = sm5_light;
 			break;
 		case sm5_light:
+			a2dstate = sm5_accel;
+			break;
+		case sm5_accel:
 			a2dstate = sm5_temp;
 			break;
 		default:
@@ -412,7 +550,7 @@ void A2D_Tick() {
 			*/
 			break;
 		case sm5_light:
-			Set_A2D_Pin(0x02);
+			Set_A2D_Pin(0x01);
 			
 			/* testing
 			lcd_goto_xy(0,0);
@@ -430,6 +568,16 @@ void A2D_Tick() {
 			//turn alarm off if lights > 57
 			light = ADC;
 			break;
+		case sm5_accel:
+			Set_A2D_Pin(0x02);
+			accelXp = accelX;
+			accelX = ADC;
+			Set_A2D_Pin(0x03);
+			accelYp = accelY;
+			accelY = ADC;
+			Set_A2D_Pin(0x04);
+			accelZp = accelZ;
+			accelZ = ADC;
 		default:
 			break;	
 	}
@@ -483,6 +631,45 @@ void FLAG_Tick() {
 	}
 }
 
+void Door_Tick() {
+	//transition
+	switch(doorstate) {
+		case sm7_on:
+			doorstate = sm7_on;
+			break;
+		default:
+			break;
+	}
+	//action
+	static short timer = 0;
+	static short skip = 0;
+	switch (doorstate) {
+		case sm7_on:
+			//if (fast || slow) {
+			//	timer ++;
+			//	skip = 1;
+			//	if (timer > 4) {
+			//		timer = 0;
+			//		skip = 0;
+			//	}
+			//}
+			//if (skip) {
+				if (abs(accelX - accelXp) == 0) {
+					fast = 0;
+					slow = 0;
+				} else if (abs(accelX - accelXp) > 30) {
+					fast = 1;
+					slow = 0;
+				} else {
+					fast = 0;
+					slow = 1;
+				}
+			//}
+			break;
+		default:
+			break;
+	}
+}
 //-------------------------------------------------------------------------------state machine inits
 //usart
 void SM1_Init() {
@@ -507,6 +694,10 @@ void SM5_INIT() {
 //flag
 void SM6_INIT() {
 	flagstate = sm6_on;
+}
+//door
+void SM7_INIT() {
+	doorstate = sm7_on;
 }
 
 //usart
@@ -546,7 +737,7 @@ void SM5Task() {
 	SM5_INIT();
 	for (;;) {
 		A2D_Tick();
-		vTaskDelay(1000);
+		vTaskDelay(250);
 	}
 }
 //flag
@@ -555,6 +746,14 @@ void SM6Task() {
 	for (;;) {
 		FLAG_Tick();
 		vTaskDelay(25);
+	}
+}
+//door
+void SM7Task() {
+	SM7_INIT();
+	for (;;) {
+		Door_Tick();
+		vTaskDelay(250);
 	}
 }
 
@@ -576,6 +775,9 @@ void StartSecPulse5(unsigned portBASE_TYPE Priority) {
 void StartSecPulse6(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM6Task, (signed portCHAR *)"SM6Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
+void StartSecPulse7(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM7Task, (signed portCHAR *)"SM7Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
 
 int main(void) {
 	// initialize ports
@@ -583,10 +785,7 @@ int main(void) {
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xF0; PORTC = 0x0F;
 	//inits
-	//actuator
 	initUSART(0);
-	//sensors
-	initUSART(1);
 	//lcd
 	lcd_init(&PORTB, PB0, &PORTB, PB1, &PORTB, PB2, &PORTB, PB3, &PORTB, PB4);
 	//adc
@@ -598,6 +797,7 @@ int main(void) {
 	StartSecPulse4(1);
 	StartSecPulse5(1);
 	StartSecPulse6(1);
+	StartSecPulse7(1);
 	//RunSchedular
 	vTaskStartScheduler();
 	
