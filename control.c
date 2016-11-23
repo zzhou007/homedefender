@@ -180,6 +180,8 @@ enum A2D_sm5 { sm5_on, sm5_temp, sm5_light, sm5_accel } a2dstate;
 enum FLAG_sm6 { sm6_on, sm6_pressed } flagstate;
 //door checks fast and slow sets variable
 enum Door_sm7 { sm7_on } doorstate;
+//motor set
+enum Motor_sm8 { sm8_on } motorstate;
 
 //sends and receives usart
 void USART_Tick() {
@@ -645,26 +647,65 @@ void Door_Tick() {
 	static short skip = 0;
 	switch (doorstate) {
 		case sm7_on:
-			//if (fast || slow) {
-			//	timer ++;
-			//	skip = 1;
-			//	if (timer > 4) {
-			//		timer = 0;
-			//		skip = 0;
-			//	}
-			//}
-			//if (skip) {
+			if (fast || slow) {
+				timer ++;
+				skip = 1;
+				if (timer > 20) {
+					timer = 0;
+					skip = 0;
+				}
+			}
+			if (!skip) {
 				if (abs(accelX - accelXp) == 0) {
 					fast = 0;
 					slow = 0;
-				} else if (abs(accelX - accelXp) > 30) {
+				} else if (abs(accelX - accelXp) > 20) {
 					fast = 1;
 					slow = 0;
-				} else {
+				} else if (abs(accelX - accelXp) > 5) {
 					fast = 0;
 					slow = 1;
 				}
-			//}
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+void Motor_Tick() {
+	//transition
+	switch(motorstate) {
+		case sm8_on:
+			motorstate = sm8_on;
+			break;
+		default:
+			break;
+	}
+	
+	switch(motorstate) {
+		char input;
+		case sm8_on:
+			input = GetKeypadKey();
+			//cata enabled
+			//if motion and cata then send 1 to spin motor
+			if (cata && ((recvsig >> 6) & 0x01)) {
+				sendsig = sendsig | 0x04;
+			} else {
+				sendsig = sendsig & 0xFB;
+			}
+			//if lock spin 
+			if (input == '*') {
+				sendsig = sendsig | 0x02;
+			} else {
+				sendsig = sendsig & 0xFD;
+			}
+			//if unlock
+			if (input == '#') {
+				sendsig = sendsig | 0x01;
+			} else {
+				sendsig = sendsig & 0xFE;
+			}
 			break;
 		default:
 			break;
@@ -695,9 +736,13 @@ void SM5_INIT() {
 void SM6_INIT() {
 	flagstate = sm6_on;
 }
-//door
+//door motion
 void SM7_INIT() {
 	doorstate = sm7_on;
+}
+//motor set
+void SM8_INIT() {
+	motorstate = sm8_on;
 }
 
 //usart
@@ -756,6 +801,14 @@ void SM7Task() {
 		vTaskDelay(250);
 	}
 }
+//motor
+void SM8Task() {
+	SM8_INIT();
+	for (;;) {
+		Motor_Tick();
+		vTaskDelay(250);
+	}
+}
 
 void StartSecPulse1(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM1Task, (signed portCHAR *)"SM1Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
@@ -778,7 +831,9 @@ void StartSecPulse6(unsigned portBASE_TYPE Priority) {
 void StartSecPulse7(unsigned portBASE_TYPE Priority) {
 	xTaskCreate(SM7Task, (signed portCHAR *)"SM7Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
 }
-
+void StartSecPulse8(unsigned portBASE_TYPE Priority) {
+	xTaskCreate(SM8Task, (signed portCHAR *)"SM8Task", configMINIMAL_STACK_SIZE, NULL, Priority, NULL );
+}
 int main(void) {
 	// initialize ports
 	DDRA = 0x00; PORTA = 0xFF;
@@ -798,6 +853,7 @@ int main(void) {
 	StartSecPulse5(1);
 	StartSecPulse6(1);
 	StartSecPulse7(1);
+	StartSecPulse8(1);
 	//RunSchedular
 	vTaskStartScheduler();
 	
