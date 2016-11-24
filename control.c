@@ -798,7 +798,7 @@ void SM8Task() {
 	SM8_INIT();
 	for (;;) {
 		Motor_Tick();
-		vTaskDelay(250);
+		vTaskDelay(25);
 	}
 }
 
