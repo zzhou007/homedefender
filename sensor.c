@@ -25,7 +25,7 @@
 
 //other includes
 #include "usart_atmega1284.h"
-
+//-----------------------------------------------------------------------------------MACRO
 //----------------------------------------------------------------------------------global variables
 /*
 0x1234 5678
@@ -126,6 +126,29 @@ void Sensor_Tick() {
 				output = output | 0x10;
 			} else {
 				output = output & 0xEF;
+			}
+			
+			//motors
+			char cata = (recvsig >> 2) & 0x01;
+			char lock = (recvsig >> 1) & 0x01;
+			char unlock = (recvsig >> 0) & 0x01;
+			
+			if (cata) {
+				output = output | 0x20;
+			} else {
+				output = output & 0xCF;
+			}
+			
+			if (lock) {
+				output = output | 0x40;
+			} else {
+				output = output & 0xBF;
+			}
+			
+			if (unlock) {
+				output = output | 0x80;
+			} else {
+				output = output & 0x7F;
 			}
 			PORTC = output;
 			break; 
@@ -306,7 +329,43 @@ void SpeakerC_Tick() {
 
 //controls the motor
 void Motor_Tick() {
-	
+	switch(motorstate) {
+		case sm5_on:
+			motorstate = sm5_on;
+			break;
+		default:
+			break;
+	}
+	switch(motorstate) {
+			char cata;
+			char lock;
+			char unlock;
+		case sm5_on:
+			cata = (recvsig >> 2) & 0x01;
+			lock = (recvsig >> 1) & 0x01;
+			unlock = (recvsig >> 0) & 0x01;
+			 
+			char output = 0b11110000;
+			//0xB0 green clockwise
+			// 1011 
+			if (lock) {
+				output = 0b10111111;
+			} 
+			//0x70 green counterclockwise
+			// 0111
+			else if (unlock) {
+				output = 0b01111111;
+			}
+			//0x20 blue clockwise
+			//0010
+			else if (cata) {
+				output = 0b00101111;
+			}
+			PORTD = output;
+			break;
+		default:
+			break;
+	}
 }
 //-------------------------------------------------------------------------------state machine inits
 //sensors and led
@@ -394,7 +453,7 @@ int main(void) {
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xFF; PORTC = 0x00;
 	//motor
-	DDRD = 0x0F; PORTD = 0xF0;
+	DDRD = 0xFF; PORTD = 0x00;
 	
 	//inits
 	//usart
